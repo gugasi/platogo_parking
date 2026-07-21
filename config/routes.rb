@@ -3,8 +3,10 @@ Rails.application.routes.draw do
 
   scope :api do
     resources :tickets, only: [:create, :show], param: :barcode do
-      # This generates POST /api/tickets/{ticket_barcode}/payments
       resources :payments, only: [:create]
+      
+      # --- NEW: Task 4 State Route ---
+      resource :state, only: [:show]
     end
   end
 end

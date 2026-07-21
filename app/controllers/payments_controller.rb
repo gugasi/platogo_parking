@@ -1,10 +1,10 @@
 class PaymentsController < ApplicationController
   def create
-    # Because the route is nested, the barcode is passed as :ticket_barcode
     ticket = Ticket.find_by!(barcode: params[:ticket_barcode])
 
-    if ticket.paid_at.present?
-      render json: { error: "Ticket is already paid" }, status: :unprocessable_entity
+    # Updated: Only block payment if they are currently within the 15-minute exit window[cite: 4]
+    if ticket.within_exit_window?
+      render json: { error: "Ticket is already paid and valid for exit" }, status: :unprocessable_entity
       return
     end
 
