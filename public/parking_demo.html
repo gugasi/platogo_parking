@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PLATOGO // PARKING TELEMETRY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+/* ==========================================================================
+   TOKENS
+   ========================================================================== */
+:root{
+  --hull:        #0d0f0c;   /* deepest panel well */
+  --panel:       #1a1e19;   /* console housing */
+  --panel-lt:    #242a22;   /* raised bevel face */
+  --border:      #3a4238;   /* steel seam */
+  --amber:       #ffb000;   /* primary phosphor */
+  --amber-dim:   #8a5c00;
+  --radar:       #39ff6a;   /* radar-scope green */
+  --radar-dim:   #1f7a3a;
+  --gold:        #f2c14e;   /* payment / gauge accent */
+  --alert:       #ff4438;   /* fault / taken */
+  --steel-blue:  #7fa6b8;   /* gate / info accent */
+  --paper:       #e8e4d0;   /* primary text, aged phosphor paper */
+  --muted:       #7d8478;
+  --radius:      7px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}
+body{
+  background:var(--hull);
+  color:var(--paper);
+  font-family:'IBM Plex Mono',monospace;
+  height:100vh;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+::selection{background:var(--amber);color:var(--hull)}
+
+/* ambient CRT dressing */
+.scanlines{position:fixed;inset:0;pointer-events:none;z-index:500;
+  background:repeating-linear-gradient(to bottom, rgba(255,255,255,.02) 0px, rgba(255,255,255,.02) 1px, transparent 1px, transparent 3px);
+  mix-blend-mode:overlay;}
+.vignette{position:fixed;inset:0;pointer-events:none;z-index:499;
+  background:radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,.5) 100%);}
+
+@keyframes boot{
+  0%{opacity:0;filter:brightness(3) contrast(1.4)}
+  6%{opacity:1;filter:brightness(.3)}
+  11%{opacity:.15;filter:brightness(2)}
+  16%{opacity:1;filter:brightness(1)}
+  100%{opacity:1;filter:brightness(1)}
+}
+#app{animation:boot .85s ease-out both;height:100%;display:flex;flex-direction:column}
+
+/* ==========================================================================
+   HEADER
+   ========================================================================== */
+.hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 20px;border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,var(--panel-lt),var(--panel));
+  flex-shrink:0;
+}
+.hdr-left{display:flex;align-items:center;gap:14px}
+.pwr{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:8px;color:var(--muted);letter-spacing:.1em}
+.pwr-led{width:9px;height:9px;border-radius:50%;background:var(--amber-dim);transition:background .3s,box-shadow .3s;animation:pulse-idle 1.6s ease-in-out infinite}
+.pwr-led.online{background:var(--radar);box-shadow:0 0 8px var(--radar);animation:pulse-ok 2.2s ease-in-out infinite}
+.pwr-led.offline{background:var(--alert);box-shadow:0 0 8px var(--alert);animation:none}
+@keyframes pulse-idle{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes pulse-ok{0%,100%{box-shadow:0 0 4px var(--radar)}50%{box-shadow:0 0 12px var(--radar),0 0 24px rgba(57,255,106,.35)}}
+.title-block{display:flex;flex-direction:column;gap:3px}
+.title{font-family:'Press Start 2P',monospace;font-size:15px;color:var(--amber);letter-spacing:.02em;text-shadow:0 0 14px rgba(255,176,0,.4)}
+.title span{color:var(--paper);font-size:9px;display:block;margin-top:4px;letter-spacing:.15em}
+.eyebrow{font-size:9px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase}
+.hdr-right{display:flex;gap:8px}
+.plate{font-size:9px;color:var(--muted);padding:6px 11px;background:var(--hull);border:1px solid var(--border);border-radius:5px;display:flex;align-items:center;gap:6px;letter-spacing:.04em}
+.plate b{color:var(--steel-blue);font-weight:600}
+.plate-dot{width:5px;height:5px;border-radius:50%;background:var(--radar-dim)}
+
+/* ==========================================================================
+   LAYOUT
+   ========================================================================== */
+.main{display:grid;grid-template-columns:1fr 336px;flex:1;overflow:hidden;min-height:0}
+
+/* ==========================================================================
+   LOT / RADAR
+   ========================================================================== */
+.lot-wrap{padding:16px;display:flex;flex-direction:column;gap:10px;overflow:hidden;min-height:0}
+.lot-bar{display:flex;align-items:center;justify-content:space-between}
+.sys-label{font-family:'Press Start 2P',monospace;font-size:7.5px;color:var(--muted);letter-spacing:.1em}
+.counters{display:flex;gap:8px}
+.counter{display:flex;align-items:baseline;gap:5px;padding:3px 11px;border-radius:20px;font-family:'VT323',monospace;border:1px solid}
+.counter-val{font-size:19px;line-height:1}
+.counter-lbl{font-size:9px;font-family:'IBM Plex Mono',monospace;letter-spacing:.08em;opacity:.75}
+.counter-free{border-color:rgba(57,255,106,.35);color:var(--radar);background:rgba(57,255,106,.08)}
+.counter-taken{border-color:rgba(255,68,56,.3);color:var(--alert);background:rgba(255,68,56,.08)}
+
+.radar-frame{
+  position:relative;background:var(--hull);border:1px solid var(--border);border-radius:10px;
+  padding:14px;flex:1;overflow:hidden;
+}
+.radar-frame::before{content:'';position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(90deg,transparent,transparent calc(10% - 1px),rgba(232,228,208,.045) calc(10% - 1px),rgba(232,228,208,.045) 10%),
+             repeating-linear-gradient(0deg,transparent,transparent calc(16.6% - 1px),rgba(232,228,208,.045) calc(16.6% - 1px),rgba(232,228,208,.045) 16.6%);}
+.radar-sweep{position:absolute;inset:0;pointer-events:none;transform-origin:center;
+  background:conic-gradient(from 0deg, transparent 0deg, rgba(57,255,106,.16) 10deg, transparent 46deg);
+  animation:sweep 7s linear infinite;mix-blend-mode:screen;}
+@keyframes sweep{to{transform:rotate(360deg)}}
+/* corner brackets, HUD-style */
+.radar-frame::after{content:'';position:absolute;inset:6px;pointer-events:none;border:1px solid transparent;
+  background:
+    linear-gradient(var(--amber-dim),var(--amber-dim)) top left / 14px 1px no-repeat,
+    linear-gradient(var(--amber-dim),var(--amber-dim)) top left / 1px 14px no-repeat,
+    linear-gradient(var(--amber-dim),var(--amber-dim)) top right / 14px 1px no-repeat,
+    linear-gradient(var(--amber-dim),var(--amber-dim)) top right / 1px 14px no-repeat,
+    linear-gradient(var(--amber-dim),var(--amber-dim)) bottom left / 14px 1px no-repeat,
+    linear-gradient(var(--amber-dim),var(--amber-dim)) bottom left / 1px 14px no-repeat,
+    linear-gradient(var(--amber-dim),var(--amber-dim)) bottom right / 14px 1px no-repeat,
+    linear-gradient(var(--amber-dim),var(--amber-dim)) bottom right / 1px 14px no-repeat;
+  opacity:.55}
+
+.grid{display:grid;grid-template-columns:24px repeat(9,1fr);grid-template-rows:repeat(6,1fr);gap:5px;height:100%;position:relative;z-index:1}
+.row-label{display:flex;align-items:center;justify-content:center;font-family:'VT323',monospace;font-size:16px;color:var(--amber-dim);letter-spacing:.05em}
+
+.sp{border:1px dashed rgba(232,228,208,.09);border-radius:4px;position:relative;overflow:hidden}
+.sp.occ{border-color:transparent}
+.sp.sel{box-shadow:0 0 0 2px var(--amber),0 0 12px rgba(255,176,0,.3)}
+.sp.sel-paid{box-shadow:0 0 0 2px var(--radar),0 0 12px rgba(57,255,106,.28)}
+.sp:disabled{cursor:default}
+.sp.occ:not(:disabled){cursor:pointer}
+.sp:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+.sp-n{position:absolute;bottom:1px;left:50%;transform:translateX(-50%);font-family:'VT323',monospace;font-size:10px;color:rgba(232,228,208,.14);pointer-events:none;z-index:2}
+
+.car{position:absolute;inset:3px;border-radius:5px 5px 4px 4px;display:flex;flex-direction:column;overflow:hidden;animation:arrive .42s cubic-bezier(.34,1.56,.64,1) both}
+@keyframes arrive{from{transform:translateY(112%) scale(.7);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}
+@keyframes depart{from{transform:translateY(0) scale(1);opacity:1}to{transform:translateY(-112%) scale(.7);opacity:0}}
+.car.leave{animation:depart .36s ease-in both}
+.c-top,.c-bot{height:14%;background:rgba(0,0,0,.32)}
+.c-top{border-radius:4px 4px 0 0}
+.c-bot{border-radius:0 0 4px 4px}
+.c-screen{height:18%;background:rgba(232,228,208,.4);margin:0 16%;border-radius:1px}
+.c-mid{flex:1;position:relative}
+.c-dot{position:absolute;top:3px;right:3px;width:5px;height:5px;border-radius:50%;background:var(--amber)}
+.c-dot.paid{background:var(--radar);box-shadow:0 0 5px var(--radar);animation:dp 1.5s ease-in-out infinite}
+@keyframes dp{0%,100%{box-shadow:0 0 4px var(--radar)}50%{box-shadow:0 0 10px var(--radar),0 0 18px rgba(57,255,106,.4)}}
+
+.lot-foot{display:flex;justify-content:space-between;padding:2px 3px 0}
+.lfl{font-family:'Press Start 2P',monospace;font-size:6px;color:rgba(232,228,208,.18);letter-spacing:.1em}
+
+/* ==========================================================================
+   PANEL / CONTROLS
+   ========================================================================== */
+.panel{border-left:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.panel-section{padding:13px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
+.panel-section .sys-label{margin-bottom:9px}
+
+.switch{position:relative;display:flex;align-items:center;gap:10px;width:100%;padding:9px 11px 9px 13px;
+  margin-bottom:5px;border-radius:6px;text-align:left;
+  background:linear-gradient(180deg,var(--panel-lt),var(--panel));
+  border:1px solid var(--border);
+  box-shadow:0 2px 0 rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.03);
+  transition:transform .08s ease, border-color .15s ease, box-shadow .08s ease;}
+.switch:last-of-type{margin-bottom:0}
+.switch:hover:not(:disabled){border-color:var(--amber-dim)}
+.switch:active:not(:disabled){transform:translateY(2px);box-shadow:0 0 0 rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.03)}
+.switch:disabled{opacity:.32;cursor:not-allowed}
+.switch:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.switch-led{width:6px;height:6px;border-radius:50%;background:var(--border);flex-shrink:0;box-shadow:inset 0 0 2px rgba(0,0,0,.6)}
+.switch:not(:disabled) .switch-led{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+.switch-icon{width:18px;height:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.switch-icon svg{width:100%;height:100%}
+.switch-enter .switch-icon{color:var(--radar)}
+.switch-price .switch-icon{color:var(--amber)}
+.switch-pay .switch-icon{color:var(--gold)}
+.switch-state .switch-icon{color:var(--steel-blue)}
+.switch-free .switch-icon{color:var(--muted)}
+.switch-text{flex:1;font-weight:600;font-size:12px;letter-spacing:.03em;text-transform:uppercase}
+.switch-sub{display:block;font-size:9px;color:var(--muted);text-transform:none;letter-spacing:0;margin-top:2px}
+
+.pay-toggle{display:flex;gap:5px;margin:0 0 6px}
+.pay-opt{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 3px;
+  background:var(--hull);border:1px solid var(--border);border-radius:5px;color:var(--muted);
+  font-size:9px;letter-spacing:.05em;transition:all .15s}
+.pay-opt svg{width:14px;height:14px}
+.pay-opt-icon{width:14px;height:14px;display:flex;align-items:center;justify-content:center}
+.pay-opt-icon svg{width:100%;height:100%}
+.pay-opt.on{border-color:var(--amber);color:var(--amber);background:rgba(255,176,0,.09);box-shadow:inset 0 0 0 1px rgba(255,176,0,.15)}
+.pay-opt:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+/* ticket / printer readout */
+.ticket{background:var(--hull);border:1px solid var(--border);border-radius:6px;padding:14px 12px 12px;position:relative}
+.ticket::before{content:'';position:absolute;top:-4px;left:10px;right:10px;height:8px;
+  background:radial-gradient(circle at 5px 4px, var(--panel) 3.4px, transparent 3.6px);
+  background-size:11px 8px;background-repeat:repeat-x}
+.ticket-bars{height:22px;border-radius:2px;margin-bottom:9px;opacity:.85;
+  background:repeating-linear-gradient(90deg, var(--paper) 0 2px, transparent 2px 3px, var(--paper) 3px 4px, transparent 4px 6px, var(--paper) 6px 9px, transparent 9px 10px, var(--paper) 10px 11px, transparent 11px 14px);}
+.ticket-code{font-family:'VT323',monospace;font-size:19px;letter-spacing:.1em;color:var(--amber);
+  text-shadow:0 0 8px rgba(255,176,0,.4);word-break:break-all;margin-bottom:9px;animation:bcin .45s ease both}
+@keyframes bcin{from{opacity:0;letter-spacing:.5em}to{opacity:1;letter-spacing:.1em}}
+.t-row{display:flex;justify-content:space-between;margin-bottom:4px;font-size:10.5px;color:var(--muted)}
+.t-row span:last-child{color:var(--paper);font-weight:600}
+.t-empty{color:var(--muted);font-size:10.5px;text-align:center;padding:10px 4px;line-height:1.7}
+
+/* log / teletype */
+.log-section{flex:1;display:flex;flex-direction:column;min-height:0;padding-bottom:0}
+.log{flex:1;overflow-y:auto;padding:0 2px 4px;font-size:10px;line-height:1.6}
+.log::-webkit-scrollbar{width:3px}
+.log::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.le{margin-bottom:9px;padding-bottom:9px;border-bottom:1px dashed rgba(232,228,208,.07)}
+.le:last-child{border-bottom:none}
+.lm{color:var(--steel-blue);font-weight:600}
+.lok{color:var(--radar)}
+.ler{color:var(--alert)}
+.lk{color:var(--amber)}
+.ls{color:var(--radar)}
+.ln{color:var(--gold)}
+.lempty{color:var(--muted);text-align:center;padding:14px 0;font-size:10px}
+
+/* ==========================================================================
+   PAYMENT GAUGE OVERLAY
+   ========================================================================== */
+.gauge-ov{position:fixed;inset:0;background:rgba(13,15,12,.9);display:flex;align-items:center;justify-content:center;
+  z-index:200;opacity:0;pointer-events:none;transition:opacity .2s}
+.gauge-ov.on{opacity:1;pointer-events:all}
+.gauge-box{background:var(--panel);border:2px solid var(--amber);border-radius:14px;padding:26px 30px;text-align:center;min-width:270px;box-shadow:0 0 44px rgba(255,176,0,.18)}
+.gauge-title{font-family:'Press Start 2P',monospace;font-size:8px;color:var(--amber);margin-bottom:20px;letter-spacing:.08em}
+.gauges{display:flex;gap:10px;justify-content:center;margin-bottom:20px}
+.gauge{width:60px;height:60px;background:var(--hull);border:2px solid var(--border);border-radius:50%;
+  display:flex;align-items:center;justify-content:center;overflow:hidden}
+.gauge svg{width:26px;height:26px;color:var(--amber)}
+.gauge-res{font-family:'Press Start 2P',monospace;font-size:10px;min-height:16px;letter-spacing:.06em;animation:respop .35s cubic-bezier(.34,1.56,.64,1) both}
+@keyframes respop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+
+/* coins */
+.coin-fly{position:fixed;width:20px;height:20px;color:var(--gold);pointer-events:none;z-index:300;
+  filter:drop-shadow(0 0 5px rgba(242,193,78,.7));animation:cfly .85s ease-out both}
+.coin-fly svg{width:100%;height:100%}
+@keyframes cfly{0%{transform:translateY(0) rotate(0deg) scale(1);opacity:1}100%{transform:translateY(-130px) rotate(560deg) scale(.3);opacity:0}}
+
+/* toast */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(70px);
+  background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--amber);
+  border-radius:8px;padding:9px 16px;font-size:11.5px;letter-spacing:.02em;z-index:400;
+  transition:transform .35s cubic-bezier(.34,1.56,.64,1);white-space:nowrap;display:flex;align-items:center;gap:9px}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast-dot{width:7px;height:7px;border-radius:50%;background:var(--amber);flex-shrink:0}
+.toast.ok{border-left-color:var(--radar)}
+.toast.ok .toast-dot{background:var(--radar);box-shadow:0 0 6px var(--radar)}
+.toast.err{border-left-color:var(--alert)}
+.toast.err .toast-dot{background:var(--alert);box-shadow:0 0 6px var(--alert)}
+.toast.info .toast-dot{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+
+/* ==========================================================================
+   RESPONSIVE
+   ========================================================================== */
+@media (max-width:1080px){
+  .main{grid-template-columns:1fr 300px}
+}
+@media (max-width:820px){
+  body{overflow:auto}
+  .main{grid-template-columns:1fr;overflow:visible}
+  .lot-wrap{min-height:420px}
+  .panel{border-left:none;border-top:1px solid var(--border)}
+}
+
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+}
+</style>
+</head>
+<body>
+
+<div class="scanlines"></div>
+<div class="vignette"></div>
+
+<div id="app">
+
+  <header class="hdr">
+    <div class="hdr-left">
+      <div class="pwr"><span class="pwr-led" id="pwr-led"></span>PWR</div>
+      <div class="title-block">
+        <h1 class="title">PLATOGO<span>TACTICAL PARKING TELEMETRY</span></h1>
+        <div class="eyebrow">SECTOR CONTROL &middot; NIGHT LOT</div>
+      </div>
+    </div>
+    <div class="hdr-right">
+      <div class="plate"><span class="plate-dot"></span>RAILS &middot; <b>POSTGRESQL</b> &middot; REST/JSON</div>
+      <div class="plate">SAVE AS <b>public/parking_demo.html</b></div>
+    </div>
+  </header>
+
+  <div class="main">
+
+    <div class="lot-wrap">
+      <div class="lot-bar">
+        <div class="sys-label">SYS.00 &mdash; SECTOR GRID &middot; 54 SPACES</div>
+        <div class="counters">
+          <div class="counter counter-free"><span class="counter-val" id="pf">54</span><span class="counter-lbl">FREE</span></div>
+          <div class="counter counter-taken"><span class="counter-val" id="pt">0</span><span class="counter-lbl">TAKEN</span></div>
+        </div>
+      </div>
+      <div class="radar-frame">
+        <div class="radar-sweep"></div>
+        <div class="grid" id="grid"></div>
+      </div>
+      <div class="lot-foot">
+        <div class="lfl">&#9650; ENTRANCE RAMP</div>
+        <div class="lfl">EXIT &middot; ROW F &#9654;</div>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <div class="panel-section">
+        <div class="sys-label">SYS.01 &mdash; CONTROLS</div>
+
+        <button class="switch switch-enter" id="btn-enter" onclick="enterLot()">
+          <span class="switch-led"></span>
+          <span class="switch-icon" id="icon-car"></span>
+          <span class="switch-text">Car Enters<span class="switch-sub">POST /api/tickets</span></span>
+        </button>
+
+        <button class="switch switch-price" id="btn-price" onclick="checkPrice()" disabled>
+          <span class="switch-led"></span>
+          <span class="switch-icon" id="icon-euro"></span>
+          <span class="switch-text">Check Price<span class="switch-sub">GET /api/tickets/:barcode</span></span>
+        </button>
+
+        <div class="pay-toggle">
+          <button class="pay-opt on" data-m="credit_card" onclick="setPay('credit_card',this)"><span class="pay-opt-icon" id="icon-pcard"></span>CARD</button>
+          <button class="pay-opt" data-m="debit_card" onclick="setPay('debit_card',this)"><span class="pay-opt-icon" id="icon-pdebit"></span>DEBIT</button>
+          <button class="pay-opt" data-m="cash" onclick="setPay('cash',this)"><span class="pay-opt-icon" id="icon-pcash"></span>CASH</button>
+        </div>
+
+        <button class="switch switch-pay" id="btn-pay" onclick="payTicket()" disabled>
+          <span class="switch-led"></span>
+          <span class="switch-icon" id="icon-gauge"></span>
+          <span class="switch-text">Pay &amp; Spin<span class="switch-sub">POST /api/tickets/:barcode/payments</span></span>
+        </button>
+
+        <button class="switch switch-state" id="btn-state" onclick="checkState()" disabled>
+          <span class="switch-led"></span>
+          <span class="switch-icon" id="icon-gate"></span>
+          <span class="switch-text">Gate State<span class="switch-sub">GET /api/tickets/:barcode/state</span></span>
+        </button>
+
+        <button class="switch switch-free" onclick="checkFree()">
+          <span class="switch-led"></span>
+          <span class="switch-icon" id="icon-hash"></span>
+          <span class="switch-text">Free Spaces<span class="switch-sub">GET /api/free-spaces</span></span>
+        </button>
+      </div>
+
+      <div class="panel-section">
+        <div class="sys-label">SYS.02 &mdash; ACTIVE TICKET</div>
+        <div id="tpanel"><div class="t-empty">NO TICKET SELECTED<br>ENTER THE LOT TO BEGIN</div></div>
+      </div>
+
+      <div class="panel-section log-section">
+        <div class="sys-label">SYS.03 &mdash; TELEMETRY LOG</div>
+        <div class="log" id="log"><div class="lempty">AWAITING REQUESTS&hellip;</div></div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<!-- payment processing overlay -->
+<div class="gauge-ov" id="slot-ov">
+  <div class="gauge-box">
+    <div class="gauge-title">PROCESSING PAYMENT</div>
+    <div class="gauges">
+      <div class="gauge" id="r0"></div>
+      <div class="gauge" id="r1"></div>
+      <div class="gauge" id="r2"></div>
+    </div>
+    <div class="gauge-res" id="slot-res"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span class="toast-dot"></span><span id="toast-msg"></span></div>
+
+<script>
+/* ============================================================
+   ICON SYSTEM — inline vector line-icons, no emoji anywhere.
+   All icons use currentColor so they inherit their button's accent.
+   ============================================================ */
+const ICON = {
+  car: `<svg viewBox="0 0 24 24" fill="none"><path d="M6 16v-5.3c0-1 .5-1.9 1.4-2.3l1.3-.6c.5-.3 1.1-.4 1.7-.4h3.2c.6 0 1.2.1 1.7.4l1.3.6c.9.4 1.4 1.3 1.4 2.3V16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="4.3" y="14.2" width="15.4" height="4.2" rx="1.2" stroke="currentColor" stroke-width="1.5"/><circle cx="7.8" cy="18.6" r="1.2" fill="currentColor"/><circle cx="16.2" cy="18.6" r="1.2" fill="currentColor"/><line x1="9" y1="10.6" x2="15" y2="10.6" stroke="currentColor" stroke-width="1.4"/></svg>`,
+  euro: `<svg viewBox="0 0 24 24" fill="none"><path d="M15.2 6.6c-1.2-.9-2.6-1.5-4-1.5-3.4 0-6.1 2.7-6.1 6s2.7 6 6.1 6c1.4 0 2.8-.5 4-1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="3.3" y1="10" x2="12.6" y2="10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="3.3" y1="13" x2="11.6" y2="13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+  gauge: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="7.2" stroke="currentColor" stroke-width="1.6"/><path d="M12 13l3-3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8.5 3.6h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+  gate: `<svg viewBox="0 0 24 24" fill="none"><circle cx="5.2" cy="18.2" r="1.5" fill="currentColor"/><circle cx="18.8" cy="9.6" r="1.5" fill="currentColor"/><line x1="5.2" y1="18.2" x2="18.8" y2="9.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="7.6" y1="16.8" x2="9" y2="19.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="11" y1="15.1" x2="12.4" y2="17.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="14.4" y1="13.4" x2="15.8" y2="15.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
+  hash: `<svg viewBox="0 0 24 24" fill="none"><line x1="9.2" y1="4" x2="7.2" y2="20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="16.8" y1="4" x2="14.8" y2="20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="4.5" y1="9" x2="20" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="3.5" y1="15" x2="19" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+  card: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6.4" width="18" height="12.2" rx="1.5" stroke="currentColor" stroke-width="1.4"/><line x1="3" y1="10.2" x2="21" y2="10.2" stroke="currentColor" stroke-width="1.4"/><line x1="6" y1="14.8" x2="10" y2="14.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+  debit: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6.4" width="18" height="12.2" rx="1.5" stroke="currentColor" stroke-width="1.4"/><rect x="6" y="9.6" width="4.2" height="3.1" rx=".6" stroke="currentColor" stroke-width="1.2"/></svg>`,
+  cash: `<svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="7.2" width="19" height="9.8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="12.1" r="2.4" stroke="currentColor" stroke-width="1.2"/><line x1="5.1" y1="9.5" x2="5.1" y2="14.7" stroke="currentColor" stroke-width="1"/><line x1="18.9" y1="9.5" x2="18.9" y2="14.7" stroke="currentColor" stroke-width="1"/></svg>`,
+  coin: `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M15 8.3c-.9-.8-2.1-1.3-3.3-1.3-2.8 0-5.1 2.2-5.1 5s2.3 5 5.1 5c1.2 0 2.4-.4 3.3-1.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="5.3" y1="10.6" x2="12.5" y2="10.6" stroke="currentColor" stroke-width="1.2"/><line x1="5.3" y1="13" x2="12" y2="13" stroke="currentColor" stroke-width="1.2"/></svg>`,
+  fault: `<svg viewBox="0 0 24 24" fill="none"><line x1="7" y1="7" x2="17" y2="17" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><line x1="17" y1="7" x2="7" y2="17" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+};
+/* reel symbols for the payment gauges — plain geometric marks, not emoji */
+const REEL_SYMS = [
+  `<svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="currentColor"/></svg>`,
+  `<svg viewBox="0 0 32 32"><polygon points="16,5 27,25 5,25" fill="currentColor"/></svg>`,
+  `<svg viewBox="0 0 32 32"><rect x="7" y="7" width="18" height="18" fill="currentColor"/></svg>`,
+  `<svg viewBox="0 0 32 32"><polygon points="16,4 28,16 16,28 4,16" fill="currentColor"/></svg>`,
+  `<svg viewBox="0 0 32 32"><polygon points="16,3 19.6,12.4 29.5,12.4 21.4,18.6 24.4,28.4 16,22.4 7.6,28.4 10.6,18.6 2.5,12.4 12.4,12.4" fill="currentColor"/></svg>`,
+  `<svg viewBox="0 0 32 32"><polygon points="16,4 26,10 26,22 16,28 6,22 6,10" fill="currentColor"/></svg>`,
+  `<svg viewBox="0 0 32 32"><path d="M13 4H19V13H28V19H19V28H13V19H4V13H13Z" fill="currentColor"/></svg>`,
+];
+
+/* ============================================================
+   CONFIG
+   Set DEMO = false when running against your real Rails API.
+   DEMO mode simulates all 5 endpoints so you can click around
+   without a backend running.
+   ============================================================ */
+const DEMO = false;
+const API  = 'http://localhost:3000/api';
+const TOTAL = 54;
+const COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#39ff6a','#3b82f6','#8b5cf6','#ec4899','#7fa6b8','#f43f5e'];
+
+let spaces = new Array(TOTAL).fill(null); // null | {barcode,color,paid,issuedAt}
+let sel       = null;
+let payMethod = 'credit_card';
+let logFirst  = true;
+let mockDB    = {};
+
+// ── MOCK API ───────────────────────────────────────────────────
+const wait = ms => new Promise(r => setTimeout(r, ms));
+function hex16(){ return Array.from({length:16}, () => '0123456789abcdef'[Math.floor(Math.random()*16)]).join(''); }
+
+const mock = {
+  async postTickets(){
+    await wait(280);
+    if (spaces.filter(Boolean).length >= TOTAL) return {ok:false, data:{error:'Parking lot is full (54 spaces)'}};
+    const b = hex16(), now = new Date().toISOString();
+    mockDB[b] = {barcode:b, issued_at:now, paid_at:null, payment_method:null};
+    return {ok:true, status:201, data:mockDB[b]};
+  },
+  async getTicket(b){
+    await wait(180);
+    const t = mockDB[b];
+    if (!t) return {ok:false, data:{error:'Ticket not found'}};
+    const paid15 = t.paid_at && Date.now() - new Date(t.paid_at) < 15*60*1000;
+    const price = paid15 ? 0 : Math.ceil((Date.now() - new Date(t.issued_at)) / 3600000) * 2;
+    return {ok:true, data:{barcode:t.barcode, price}};
+  },
+  async postPayment(b){
+    await wait(340);
+    const t = mockDB[b];
+    if (!t) return {ok:false, data:{error:'Ticket not found'}};
+    if (t.paid_at && Date.now() - new Date(t.paid_at) < 15*60*1000)
+      return {ok:false, data:{error:'Ticket has already been paid'}};
+    t.paid_at = new Date().toISOString();
+    t.payment_method = payMethod;
+    return {ok:true, status:201, data:{barcode:t.barcode, paid_at:t.paid_at, payment_method:t.payment_method}};
+  },
+  async getState(b){
+    await wait(160);
+    const t = mockDB[b];
+    if (!t) return {ok:false, data:{error:'Ticket not found'}};
+    const paid15 = t.paid_at && Date.now() - new Date(t.paid_at) < 15*60*1000;
+    return {ok:true, data:{barcode:b, state: paid15 ? 'paid' : 'unpaid'}};
+  },
+  async getFree(){
+    await wait(120);
+    const taken = spaces.filter(Boolean).length;
+    return {ok:true, data:{total_spaces:TOTAL, free_spaces:TOTAL-taken, taken_spaces:taken}};
+  }
+};
+
+// ── REAL API ───────────────────────────────────────────────────
+async function apiFetch(method, path, body){
+  try{
+    const opts = {method, headers:{'Content-Type':'application/json'}};
+    if (body) opts.body = JSON.stringify(body);
+    const r = await fetch(API + path, opts);
+    return {ok:r.ok, status:r.status, data:await r.json()};
+  } catch { return {ok:false, data:{error:'Connection refused — run: rails server'}}; }
+}
+
+// ── ACTIONS ────────────────────────────────────────────────────
+async function enterLot(){
+  const r = DEMO ? await mock.postTickets() : await apiFetch('POST','/tickets');
+  logResp('POST', '/api/tickets', r);
+  setPwr(r.ok);
+  if (!r.ok) return toast(r.data.error || 'Request failed', 'err');
+  const idx = spaces.indexOf(null);
+  const color = COLORS[idx % COLORS.length];
+  const t = {barcode:r.data.barcode, color, paid:false, issuedAt:r.data.issued_at};
+  spaces[idx] = t;
+  drawCar(idx, t);
+  updateStats();
+  selectTicket(r.data.barcode, idx);
+  toast('Ticket issued — welcome', 'ok');
+}
+
+async function checkPrice(){
+  if (!sel) return;
+  const r = DEMO ? await mock.getTicket(sel) : await apiFetch('GET', `/tickets/${sel}`);
+  logResp('GET', `/api/tickets/${sel.slice(0,8)}…`, r);
+  setPwr(r.ok);
+  if (!r.ok) return toast(r.data.error || 'Request failed', 'err');
+  toast(r.data.price === 0 ? 'Already paid — €0 due' : `Due: €${r.data.price.toFixed(2)}`, 'info');
+}
+
+async function payTicket(){
+  if (!sel) return;
+  const overlay = document.getElementById('slot-ov');
+  const gauges  = [0,1,2].map(i => document.getElementById('r'+i));
+  const resEl   = document.getElementById('slot-res');
+
+  resEl.textContent = '';
+  overlay.classList.add('on');
+
+  const timers = gauges.map(g => setInterval(() => {
+    g.innerHTML = REEL_SYMS[Math.floor(Math.random()*REEL_SYMS.length)];
+  }, 80));
+
+  const result = DEMO ? await mock.postPayment(sel) : await apiFetch('POST', `/tickets/${sel}/payments`, {payment_method:payMethod});
+  logResp('POST', `/api/tickets/${sel.slice(0,8)}…/payments`, result);
+  setPwr(result.ok);
+
+  for (let i = 0; i < 3; i++){
+    await wait(300);
+    clearInterval(timers[i]);
+    gauges[i].innerHTML = result.ok ? ICON.coin : ICON.fault;
+    gauges[i].style.color = result.ok ? 'var(--radar)' : 'var(--alert)';
+  }
+  await wait(200);
+  resEl.textContent = result.ok ? 'PAYMENT ACCEPTED' : 'PAYMENT DECLINED';
+  resEl.style.color = result.ok ? 'var(--radar)' : 'var(--alert)';
+
+  if (result.ok){
+    const idx = spaces.findIndex(s => s?.barcode === sel);
+    if (idx !== -1){ spaces[idx].paid = true; setDot(idx, true); updateSel(idx); }
+    spawnCoins();
+  }
+
+  await wait(1200);
+  overlay.classList.remove('on');
+  gauges.forEach(g => g.style.color = '');
+  if (!result.ok) toast(result.data.error || (result.data.errors ? result.data.errors.join(', ') : 'Payment failed'), 'err');
+}
+
+async function checkState(){
+  if (!sel) return;
+  const r = DEMO ? await mock.getState(sel) : await apiFetch('GET', `/tickets/${sel}/state`);
+  logResp('GET', `/api/tickets/${sel.slice(0,8)}…/state`, r);
+  setPwr(r.ok);
+  if (!r.ok) return toast(r.data.error || 'Request failed', 'err');
+  const isPaid = r.data.state === 'paid';
+  toast(isPaid ? 'Gate open — drive safe' : 'Gate closed — payment required', isPaid ? 'ok' : 'err');
+  if (isPaid){ await wait(400); exitCar(); }
+}
+
+async function checkFree(){
+  const r = DEMO ? await mock.getFree() : await apiFetch('GET', '/free-spaces');
+  logResp('GET', '/api/free-spaces', r);
+  setPwr(r.ok);
+  if (!r.ok) return toast(r.data.error || 'Request failed', 'err');
+  document.getElementById('pf').textContent = r.data.free_spaces;
+  document.getElementById('pt').textContent = r.data.taken_spaces;
+  toast(`${r.data.free_spaces} / ${r.data.total_spaces} spaces free`, 'info');
+}
+
+// ── GRID / CARS ────────────────────────────────────────────────
+function buildGrid(){
+  const g = document.getElementById('grid');
+  for (let row = 0; row < 6; row++){
+    const rl = document.createElement('div');
+    rl.className = 'row-label';
+    rl.textContent = String.fromCharCode(65 + row);
+    g.appendChild(rl);
+    for (let col = 0; col < 9; col++){
+      const i = row * 9 + col;
+      const d = document.createElement('button');
+      d.className = 'sp'; d.id = 'sp' + i; d.disabled = true; d.type = 'button';
+      d.innerHTML = `<div class="sp-n">${String.fromCharCode(65+row)}${col+1}</div>`;
+      d.onclick = () => { if (spaces[i]) selectTicket(spaces[i].barcode, i); };
+      g.appendChild(d);
+    }
+  }
+}
+
+function drawCar(idx, t){
+  const sp = document.getElementById('sp'+idx);
+  sp.classList.add('occ');
+  sp.disabled = false;
+  const row = Math.floor(idx/9), col = idx%9;
+  sp.innerHTML = `<div class="car" style="background:${t.color}">
+    <div class="c-top"></div>
+    <div class="c-screen"></div>
+    <div class="c-mid"><div class="c-dot" id="dot${idx}"></div></div>
+    <div class="c-bot"></div>
+  </div><div class="sp-n">${String.fromCharCode(65+row)}${col+1}</div>`;
+}
+
+function setDot(idx, paid){
+  const d = document.getElementById('dot'+idx);
+  if (d) d.className = 'c-dot' + (paid ? ' paid' : '');
+}
+
+function updateSel(idx){
+  const sp = document.getElementById('sp'+idx);
+  if (!sp) return;
+  sp.className = 'sp occ ' + (spaces[idx]?.paid ? 'sel-paid' : 'sel');
+}
+
+function exitCar(){
+  const idx = spaces.findIndex(s => s?.barcode === sel);
+  if (idx === -1) return;
+  const car = document.querySelector('#sp'+idx+' .car');
+  if (car) car.classList.add('leave');
+  setTimeout(() => {
+    spaces[idx] = null;
+    const row = Math.floor(idx/9), col = idx%9;
+    const sp = document.getElementById('sp'+idx);
+    sp.className = 'sp'; sp.disabled = true;
+    sp.innerHTML = `<div class="sp-n">${String.fromCharCode(65+row)}${col+1}</div>`;
+    sel = null;
+    disableBtns();
+    document.getElementById('tpanel').innerHTML = '<div class="t-empty">CAR EXITED — SPACE FREE</div>';
+    updateStats();
+  }, 420);
+}
+
+function selectTicket(barcode, idx){
+  if (sel){
+    const oi = spaces.findIndex(s => s?.barcode === sel);
+    if (oi !== -1) document.getElementById('sp'+oi).className = 'sp occ';
+  }
+  sel = barcode;
+  updateSel(idx);
+  ['btn-price','btn-pay','btn-state'].forEach(id => document.getElementById(id).disabled = false);
+  const t = spaces[idx];
+  const row = Math.floor(idx/9), col = idx%9;
+  document.getElementById('tpanel').innerHTML = `<div class="ticket">
+    <div class="ticket-bars"></div>
+    <div class="ticket-code">${t.barcode}</div>
+    <div class="t-row"><span>SPACE</span><span>${String.fromCharCode(65+row)}${col+1}</span></div>
+    <div class="t-row"><span>ISSUED</span><span>${new Date(t.issuedAt).toLocaleTimeString()}</span></div>
+    <div class="t-row"><span>STATUS</span><span style="color:${t.paid ? 'var(--radar)' : 'var(--amber)'}">${t.paid ? 'PAID' : 'UNPAID'}</span></div>
+  </div>`;
+}
+
+function disableBtns(){
+  ['btn-price','btn-pay','btn-state'].forEach(id => document.getElementById(id).disabled = true);
+}
+
+function updateStats(){
+  const taken = spaces.filter(Boolean).length;
+  document.getElementById('pf').textContent = TOTAL - taken;
+  document.getElementById('pt').textContent = taken;
+}
+
+function setPay(m, el){
+  payMethod = m;
+  document.querySelectorAll('.pay-opt').forEach(b => b.classList.remove('on'));
+  el.classList.add('on');
+}
+
+function setPwr(ok){
+  const led = document.getElementById('pwr-led');
+  led.classList.remove('online','offline');
+  led.classList.add(ok ? 'online' : 'offline');
+}
+
+// ── COINS ──────────────────────────────────────────────────────
+function spawnCoins(){
+  for (let i = 0; i < 9; i++){
+    setTimeout(() => {
+      const c = document.createElement('div');
+      c.className = 'coin-fly';
+      c.innerHTML = ICON.coin;
+      c.style.left = (15 + Math.random()*70) + '%';
+      c.style.top  = (20 + Math.random()*40) + '%';
+      c.style.animationDelay = (Math.random()*.3)+'s';
+      document.body.appendChild(c);
+      setTimeout(() => c.remove(), 1100);
+    }, i * 70);
+  }
+}
+
+// ── LOG ────────────────────────────────────────────────────────
+function logResp(method, path, r){
+  const log = document.getElementById('log');
+  if (logFirst){ log.innerHTML = ''; logFirst = false; }
+  const json = JSON.stringify(r.data, null, 2)
+    .replace(/"([^"]+)":/g, '<span class="lk">"$1":</span>')
+    .replace(/: "([^"]+)"/g, ': <span class="ls">"$1"</span>')
+    .replace(/: (-?\d+\.?\d*)/g, ': <span class="ln">$1</span>')
+    .replace(/: (true|false|null)/g, ': <span class="ln">$1</span>');
+  const e = document.createElement('div');
+  e.className = 'le';
+  e.innerHTML = `<span class="lm">${method} ${path}</span><br><span class="${r.ok?'lok':'ler'}">${json}</span>`;
+  log.insertBefore(e, log.firstChild);
+}
+
+// ── TOAST ──────────────────────────────────────────────────────
+let toastT;
+function toast(msg, type){
+  const el = document.getElementById('toast');
+  document.getElementById('toast-msg').textContent = msg.toUpperCase();
+  el.classList.remove('ok','err','info');
+  el.classList.add(type || 'info', 'show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+// ── INIT ───────────────────────────────────────────────────────
+function mountIcons(){
+  document.getElementById('icon-car').innerHTML    = ICON.car;
+  document.getElementById('icon-euro').innerHTML   = ICON.euro;
+  document.getElementById('icon-pcard').innerHTML  = ICON.card;
+  document.getElementById('icon-pdebit').innerHTML = ICON.debit;
+  document.getElementById('icon-pcash').innerHTML  = ICON.cash;
+  document.getElementById('icon-gauge').innerHTML  = ICON.gauge;
+  document.getElementById('icon-gate').innerHTML   = ICON.gate;
+  document.getElementById('icon-hash').innerHTML   = ICON.hash;
+}
+mountIcons();
+buildGrid();
+checkFree();
+</script>
+
+</body>
+</html>
