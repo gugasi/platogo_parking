@@ -2,7 +2,7 @@ Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
 
   scope :api do
-    # im gonna use param: :barcode so future routes look like /api/tickets/{barcode}
-    resources :tickets, only: [:create], param: :barcode
+    # Added :show for Task 2
+    resources :tickets, only: [:create, :show], param: :barcode
   end
 end
