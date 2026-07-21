@@ -7,15 +7,19 @@ class Ticket < ApplicationRecord
   validates :barcode, presence: true, uniqueness: true, format: { with: /\A[a-f0-9]{16}\z/i }
   validates :issued_at, presence: true
   validate :parking_lot_must_have_capacity, on: :create
+  
+  # --- NEW: Task 3 Payment Validation ---
+  validates :payment_method, inclusion: { in: %w[credit_card debit_card cash] }, allow_nil: true
 
   before_validation :generate_barcode_and_issued_at, on: :create
 
-  # --- NEW: Task 2 Pricing Logic ---
   def calculate_price
+    # --- NEW: Task 3 Price 0 Logic ---
+    return 0.0 if paid_at.present?
+
     duration_in_seconds = Time.current - issued_at
     started_hours = (duration_in_seconds / 1.hour.to_f).ceil
     
-    # If less than a minute has passed, it still counts as 1 started hour
     started_hours = 1 if started_hours.zero? 
     
     started_hours * HOURLY_RATE
